@@ -210,10 +210,30 @@ function parseSchedules(html) {
 
 function sortSchedules(s) {
     s.sort((a, b) => {
-        const af = a.startDate > today;
-        const bf = b.startDate > today;
-        if (af !== bf) return af ? -1 : 1;
-        return af ? a.startDate - b.startDate : b.startDate - a.startDate;
+        const todayMs = today.getTime();
+
+        const getCategory = (schedule) => {
+            if (schedule.startDate.getTime() <= todayMs && todayMs <= schedule.endDate.getTime()) {
+                return 1;
+            } else if (schedule.startDate.getTime() > todayMs) {
+                return 2;
+            } else {
+                return 3;
+            }
+        };
+
+        const categoryA = getCategory(a);
+        const categoryB = getCategory(b);
+
+        if (categoryA !== categoryB) {
+            return categoryA - categoryB;
+        }
+
+        if (categoryA === 1 || categoryA === 2) {
+            return a.startDate.getTime() - b.startDate.getTime();
+        } else {
+            return b.startDate.getTime() - a.startDate.getTime();
+        }
     });
 }
 
