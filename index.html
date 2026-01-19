@@ -90,7 +90,7 @@
     <h1>Orar XII E</h1>
     <h2 id="subtitle-date"></h2>
     <div id="status-container">
-        <div id="loading-status">initializing</div>
+        <div id="loading-status">1/3 init</div>
     </div>
     <div id="schedules-container"></div>
 
@@ -143,7 +143,7 @@ async function findAndDisplayAllSchedules() {
 
 async function fetchAndCache() {
     try {
-        loadingStatus.textContent = 'download';
+        loadingStatus.textContent = '2/3 download';
         const res = await proxiedFetch(orarPageUrl);
         if (!res.ok) throw new Error(`proxy error: ${res.statusText}`);
 
@@ -157,7 +157,7 @@ async function fetchAndCache() {
             return;
         }
 
-        loadingStatus.textContent = 'sorting';
+        loadingStatus.textContent = '3/3 sort';
         sortSchedules(schedules);
 
         const data = [];
