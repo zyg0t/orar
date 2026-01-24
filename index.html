@@ -70,7 +70,7 @@
 </head>
 <body>
     <div id="status-container">
-        <div id="loading-status">⮞ Inițializare...</div>
+        <div id="loading-status">➤ Inițializare...</div>
     </div>
     <div id="schedules-container"></div>
 
@@ -106,7 +106,7 @@ async function findAndDisplayAllSchedules() {
     if (cached) {
         const { timestamp, data } = JSON.parse(cached);
         if (Date.now() - timestamp < CACHE_TTL) {
-            loadingStatus.textContent = '⮞ Încărcat din cache';
+            loadingStatus.textContent = '➤ Încărcat din cache';
             return renderFromCache(data);
         }
     }
@@ -115,20 +115,20 @@ async function findAndDisplayAllSchedules() {
 
 async function fetchAndCache() {
     try {
-        loadingStatus.textContent = '⮞ Descărcare orar...';
+        loadingStatus.textContent = '➤ Descărcare orar...';
         const res = await proxiedFetch(orarPageUrl);
-        if (!res.ok) throw new Error(`⮞ Eroare proxy: ${res.statusText}`);
+        if (!res.ok) throw new Error(`➤ Eroare proxy: ${res.statusText}`);
 
-        loadingStatus.textContent = '⮞ Analizare date...';
+        loadingStatus.textContent = '➤ Analizare date...';
         const html = await res.text();
         const schedules = parseSchedules(html);
 
         if (!schedules.length) {
-            loadingStatus.textContent = '⮞ Eroare la procesarea paginii.';
+            loadingStatus.textContent = '➤ Eroare la procesarea paginii.';
             return;
         }
 
-        loadingStatus.textContent = '⮞ Organizare...';
+        loadingStatus.textContent = '➤ Organizare...';
         sortSchedules(schedules);
 
         const data = [];
@@ -145,7 +145,7 @@ async function fetchAndCache() {
         renderFromCache(data);
 
     } catch (e) {
-        loadingStatus.textContent = '⮞ Eroare: ' + e.message;
+        loadingStatus.textContent = '➤ Eroare: ' + e.message;
         console.error(e);
     }
 }
@@ -224,7 +224,7 @@ async function renderSchedule(title, page, startDate, endDate) {
     div.className = 'schedule-item';
     const isCur = sDate <= today && today <= eDate, isFut = sDate > today;
     h2.style.color = isCur ? '#4caf50' : (isFut ? '#2196f3' : '#ffffff');
-    h2.textContent = `${isCur ? 'Orarul curent' : isFut ? 'Orarul următor' : 'Orarul precedent'} ⮞ ${title}`;
+    h2.textContent = `${isCur ? 'Orarul curent' : isFut ? 'Orarul următor' : 'Orarul precedent'} ➤ ${title}`;
 
     const vp = page.getViewport({scale: 2.0});
     [canvas.width, canvas.height] = [vp.width, vp.height];
