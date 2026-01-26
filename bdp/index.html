@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orar Bulgaru Doinita</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <style>
+    body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+        line-height: 1;
+        color: #e0e0e0;
+        text-align: center;
+        background-color: #07090e;
+        margin: 0;
+        padding: 20px 20px 60px 20px;
+    }
+    #status-container {
+        max-width: 1000px;
+        margin: 30px auto;
+        padding: 15px;
+        background-color: transparent;
+    }
+    #loading-status {
+        font-weight: 500;
+        color: #888;
+    }
+    #schedules-container {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        margin-top: 20px;
+    }
+    .schedule-item {
+        background-color: transparent;
+        border: 0px solid #e0e0e0;
+        padding: 24px;
+        margin: 0 auto;
+        width: 95%;
+        max-width: 1000px;
+        box-sizing: border-box;
+    }
+    .schedule-item h2 {
+        color: #e0e0e0;
+        font-weight: 500;
+        padding-bottom: 0px;
+        margin-top: 0;
+        font-size: 1.5em;
+    }
+    .schedule-item canvas {
+        display: block;
+        margin: 0 auto;
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+    }
+    @media (max-width: 600px) {
+        body {
+            padding: 10px 10px 30px 10px;
+        }
+        .schedule-item {
+            padding: 4px;
+            width: 100%;
+        }
+        #schedules-container {
+            gap: 4px;
+            margin-top: 4px;
+        }
+    }
+</style>
+</head>
+<body>
+    <div id="status-container">
+        <div id="loading-status">➤ Inițializare...</div>
+    </div>
+    <div id="schedules-container"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const orarPageUrl = 'https://www.colegiulasachi.ro/orar.html';
+const proxyUrl = 'https://corsproxy.io/?';
+const searchText = 'Bulgaru Doinita';
+const today = new Date();
+
+const CACHE_KEY = 'orarbdp-cache-v2';
+const CACHE_TTL = 12 * 60 * 60 * 1000;
+
+const loadingStatus = document.getElementById('loading-status');
+const schedulesContainer = document.getElementById('schedules-container');
+const statusContainer = document.getElementById('status-container');
+const parser = new DOMParser();
+
+const normalize = s =>
+    s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+
+const needle = normalize(searchText);
+
+const proxiedFetch = url =>
+    fetch(proxyUrl + encodeURIComponent(url));
+
+async function findAndDisplayAllSchedules() {
+    const cached = localStorage.getItem(CACHE_KEY);
+
+    if (cached) {
+        const { timestamp, data } = JSON.parse(cached);
+        if (Date.now() - timestamp < CACHE_TTL) {
+            loadingStatus.textContent = '➤ Încărcat din cache';
+            return renderFromCache(data);
+        }
+    }
+    fetchAndCache();
+}
+
+async function fetchAndCache() {
+    try {
+        loadingStatus.textContent = '➤ Descărcare orar...';
+        const res = await proxiedFetch(orarPageUrl);
+        if (!res.ok) throw new Error(`➤ Eroare proxy: ${res.statusText}`);
+
+        loadingStatus.textContent = '➤ Analizare date...';
+        const html = await res.text();
+        const schedules = parseSchedules(html);
+
+        if (!schedules.length) {
+            loadingStatus.textContent = '➤ Eroare la procesarea paginii.';
+            return;
+        }
+
+        loadingStatus.textContent = '➤ Organizare...';
+        sortSchedules(schedules);
+
+        const data = [];
+        for (const { url, title, startDate, endDate } of schedules) {
+            const pageNumber = await findPageNumber(url);
+            if (pageNumber) data.push({ url, title, pageNumber, startDate, endDate });
+        }
+
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+            timestamp: Date.now(),
+            data
+        }));
+
+        renderFromCache(data);
+
+    } catch (e) {
+        loadingStatus.textContent = '➤ Eroare: ' + e.message;
+        console.error(e);
+    }
+}
+
+function parseSchedules(html) {
+    return html
+        .split(/_+[\*_]*_+/g)
+        .map(block => {
+            if (block.trim().length < 10) return null;
+
+            const doc = parser.parseFromString(block, 'text/html');
+            const link = [...doc.querySelectorAll('a')]
+                .find(a => a.textContent.trim().includes('Fiecare profesor'));
+            if (!link) return null;
+
+            const text = doc.body.textContent;
+            const m = text.match(/(\d{1,2})\s*-\s*(\d{1,2})\.(\d{2})\.(\d{4})/);
+            if (!m) return null;
+
+            const [, sd, ed, mo, y] = m.map(Number);
+            const titleMatch = text.match(/S\d+/);
+            const date = `(${sd}-${ed}.${mo}.${y})`;
+
+            return {
+                url: new URL(link.getAttribute('href'), orarPageUrl).href,
+                title: titleMatch ? `${titleMatch[0]} ${date}` : date,
+                startDate: new Date(y, mo - 1, sd),
+                endDate: new Date(y, mo - 1, ed, 23, 59, 59)
+            };
+        })
+        .filter(Boolean);
+}
+
+function sortSchedules(s) {
+    s.sort((a, b) => {
+        const todayMs = today.getTime();
+        const getCategory = (schedule) => {
+            if (schedule.startDate.getTime() <= todayMs && todayMs <= schedule.endDate.getTime()) return 1;
+            if (schedule.startDate.getTime() > todayMs) return 2;
+            return 3;
+        };
+        const categoryA = getCategory(a);
+        const categoryB = getCategory(b);
+        if (categoryA !== categoryB) return categoryA - categoryB;
+        return (categoryA === 3) ? b.startDate - a.startDate : a.startDate - b.startDate;
+    });
+}
+
+async function findPageNumber(url) {
+    const res = await proxiedFetch(url);
+    const pdf = await pdfjsLib.getDocument({ data: await res.arrayBuffer() }).promise;
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const text = normalize((await page.getTextContent()).items.map(t => t.str).join(' '));
+        if (text.includes(needle)) return i;
+    }
+    return null;
+}
+
+async function renderFromCache(data) {
+    statusContainer.style.display = 'none';
+    for (const { url, title, pageNumber, startDate, endDate } of data) {
+        const pdf = await pdfjsLib.getDocument(proxyUrl + encodeURIComponent(url)).promise;
+        const page = await pdf.getPage(pageNumber);
+        renderSchedule(title, page, startDate, endDate);
+    }
+}
+
+async function renderSchedule(title, page, startDate, endDate) {
+    const thick = 0.4;
+    const div = document.createElement('div'), h2 = document.createElement('h2'), canvas = document.createElement('canvas');
+    const sDate = new Date(startDate), eDate = new Date(endDate);
+    const ctx = canvas.getContext('2d', {willReadFrequently: true});
+
+    div.className = 'schedule-item';
+    const isCur = sDate <= today && today <= eDate, isFut = sDate > today;
+    h2.style.color = isCur ? '#4caf50' : (isFut ? '#2196f3' : '#ffffff');
+    h2.textContent = `${isCur ? 'Orarul curent' : isFut ? 'Orarul următor' : 'Orarul precedent'} ➤ ${title}`;
+
+    const vp = page.getViewport({scale: 2.0});
+    [canvas.width, canvas.height] = [vp.width, vp.height];
+    div.append(h2, canvas);
+    schedulesContainer.appendChild(div);
+
+    await page.render({canvasContext: ctx, viewport: vp}).promise;
+
+    if (thick > 0) {
+        ctx.globalCompositeOperation = 'multiply';
+        for(let x=-thick; x<=thick; x++) {
+            for(let y=-thick; y<=thick; y++) {
+                if(x!==0 || y!==0) ctx.drawImage(canvas, x, y);
+            }
+        }
+        ctx.globalCompositeOperation = 'source-over';
+    }
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height), d = imgData.data;
+    for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > 220 && d[i+1] > 220 && d[i+2] > 220) d[i+3] = 0;
+        else {
+            d[i] = 255 - d[i] || 7;
+            d[i+1] = 255 - d[i+1] || 9;
+            d[i+2] = 255 - d[i+2] || 14;
+        }
+    }
+    ctx.putImageData(imgData, 0, 0);
+}
+
+findAndDisplayAllSchedules();
+</script>
+</body>
+</html>
