@@ -15,46 +15,15 @@
         margin: 0;
         padding: 20px 20px 60px 20px;
     }
-    #status-container {
-        max-width: 1000px;
-        margin: 30px auto;
-        padding: 15px;
-    }
-    #loading-status {
-        font-weight: 500;
-        color: #888;
-    }
-    #schedules-container {
-        display: flex;
-        flex-direction: column;
-        gap: 0;
-        margin-top: 20px;
-    }
-    .schedule-item {
-        background-color: transparent;
-        padding: 24px;
-        margin: 0 auto;
-        width: 95%;
-        max-width: 1000px;
-        box-sizing: border-box;
-    }
-    .schedule-item h2 {
-        color: #e0e0e0;
-        font-weight: 500;
-        margin-top: 0;
-        font-size: 1.5em;
-    }
-    .schedule-item canvas {
-        display: block;
-        margin: 0 auto;
-        width: 100%;
-        height: auto;
-        border-radius: 4px;
-    }
+    #status-container { max-width: 1000px; margin: 30px auto; padding: 15px; }
+    #loading-status { font-weight: 500; color: #888; }
+    #schedules-container { display: flex; flex-direction: column; gap: 0; margin-top: 20px; }
+    .schedule-item { background-color: transparent; padding: 24px; margin: 0 auto; width: 95%; max-width: 1000px; box-sizing: border-box; }
+    .schedule-item h2 { color: #e0e0e0; font-weight: 500; margin-top: 0; font-size: 1.5em; }
+    .schedule-item canvas { display: block; margin: 0 auto; width: 100%; height: auto; border-radius: 4px; }
     @media (max-width: 600px) {
         body { padding: 10px 10px 30px 10px; }
         .schedule-item { padding: 4px; width: 100%; }
-        #schedules-container { gap: 4px; margin-top: 4px; }
     }
 </style>
 </head>
@@ -69,10 +38,14 @@
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const orarPageUrl = 'https://www.colegiulasachi.ro/orar.html';
-const proxyUrl = 'https://corsproxy.io/?';
+const proxies = [
+    url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+];
+
 const searchText = 'Lamatic Lidia';
 const today = new Date();
-const CACHE_KEY = 'orar-cache-v2';
+const CACHE_KEY = 'orar-cache-v3';
 const CACHE_TTL = 12 * 60 * 60 * 1000;
 
 const loadingStatus = document.getElementById('loading-status');
@@ -83,14 +56,22 @@ const parser = new DOMParser();
 const normalize = s => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
 const needle = normalize(searchText);
 
-const proxiedFetch = url => fetch(proxyUrl + encodeURIComponent(url));
+async function smartFetch(url) {
+    for (let proxy of proxies) {
+        try {
+            const res = await fetch(proxy(url));
+            if (res.ok) return res;
+        } catch (e) { continue; }
+    }
+    throw new Error("Toate proxy-urile au eșuat (403/Limită).");
+}
 
 async function findAndDisplayAllSchedules() {
     const cached = localStorage.getItem(CACHE_KEY);
     if (cached) {
         const { timestamp, data } = JSON.parse(cached);
         if (Date.now() - timestamp < CACHE_TTL) {
-            loadingStatus.textContent = '➤ Încărcat din cache';
+            loadingStatus.textContent = '➤ Din cache';
             return renderFromCache(data);
         }
     }
@@ -99,22 +80,20 @@ async function findAndDisplayAllSchedules() {
 
 async function fetchAndCache() {
     try {
-        loadingStatus.textContent = '➤ Descărcare orar...';
-        const res = await proxiedFetch(orarPageUrl);
-        if (!res.ok) throw new Error(`Eroare proxy: ${res.status}`);
-
+        loadingStatus.textContent = '➤ Accesare server...';
+        const res = await smartFetch(orarPageUrl);
         const html = await res.text();
         const schedules = parseSchedules(html);
 
         if (!schedules.length) {
-            loadingStatus.textContent = '➤ Nu s-au găsit orare.';
+            loadingStatus.textContent = '➤ Orar indisponibil.';
             return;
         }
 
         sortSchedules(schedules);
-
         const data = [];
         for (const s of schedules) {
+            loadingStatus.textContent = `➤ Căutare în ${s.title}...`;
             const pageNumber = await findPageNumber(s.url);
             if (pageNumber) data.push({ ...s, pageNumber });
         }
@@ -132,11 +111,9 @@ function parseSchedules(html) {
         const doc = parser.parseFromString(block, 'text/html');
         const link = [...doc.querySelectorAll('a')].find(a => a.textContent.includes('Fiecare clasa'));
         if (!link) return null;
-
         const text = doc.body.textContent;
         const m = text.match(/(\d{1,2})\s*-\s*(\d{1,2})\.(\d{2})\.(\d{4})/);
         if (!m) return null;
-
         const [, sd, ed, mo, y] = m.map(Number);
         const titleMatch = text.match(/S\d+/);
         return {
@@ -159,8 +136,7 @@ function sortSchedules(s) {
 
 async function findPageNumber(url) {
     try {
-        const res = await proxiedFetch(url);
-        if(!res.ok) return null;
+        const res = await smartFetch(url);
         const buffer = await res.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -176,7 +152,7 @@ async function renderFromCache(data) {
     statusContainer.style.display = 'none';
     for (const item of data) {
         try {
-            const res = await proxiedFetch(item.url);
+            const res = await smartFetch(item.url);
             const buffer = await res.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
             const page = await pdf.getPage(item.pageNumber);
